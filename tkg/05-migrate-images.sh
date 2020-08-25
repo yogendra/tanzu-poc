@@ -15,10 +15,12 @@
 SCRIPT_ROOT=$( cd `dirname $0`; pwd)
 source $SCRIPT_ROOT/.env
 
+tkg get mc &>> /dev/null
 
 TKG_DIR=${HOME}/.tkg
 BOM_DIR=${TKG_DIR}/bom
 TKG_CUSTOM_IMAGE_REPOSITORY=$LOCAL_REGISTRY
+
 
 for TKG_BOM_FILE in "$BOM_DIR"/*.yaml; do
     # Get actual image repository from BoM file
@@ -41,16 +43,7 @@ for TKG_BOM_FILE in "$BOM_DIR"/*.yaml; do
         docker push $customImage
     done
 done
+echo "TKG_CUSTOM_IMAGE_REPOSITORY: $TKG_CUSTOM_IMAGE_REPOSITORY" > add_config.yaml
 
-
-
-if  grep TKG_CUSTOM_IMAGE_REPOSITORY:  $TKG_DIR/config.yaml
-then 
-    echo "Replace TKG_CUSTOM_IMAGE_REPOSITORY in config"
-    sed -i '' "s/TKG_CUSTOM_IMAGE_REPOSITORY: .*$/TKG_CUSTOM_IMAGE_REPOSITORY: $TKG_CUSTOM_IMAGE_REPOSITORY/g" $TKG_DIR/config.yaml
-else 
-    echo "Add  TKG_CUSTOM_IMAGE_REPOSITORY to config"
-    echo "TKG_CUSTOM_IMAGE_REPOSITORY: $TKG_CUSTOM_IMAGE_REPOSITORY" >> ${TKG_DIR}/config.yaml
-fi
-
-
+yq m -i $TKG_DIR/config.yaml > add_config.yaml
+rm add_config.yaml
