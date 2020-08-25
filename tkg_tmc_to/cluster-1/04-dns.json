@@ -1,0 +1,18 @@
+{
+  "Comment": "Updating cluster-1.poc.yogendra.me to aab9f9f2483e347f8b8f203a59985bbc-ef25d83efc18d831.elb.ap-southeast-1.amazonaws.com",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "cluster-1.poc.yogendra.me",
+        "Type": "CNAME",
+        "TTL": 60,
+        "ResourceRecords": [
+          {
+            "Value": "aab9f9f2483e347f8b8f203a59985bbc-ef25d83efc18d831.elb.ap-southeast-1.amazonaws.com"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "Comment": "Updating poc.yogendra.me",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "cluster-4.poc.yogendra.me",
+        "Type": "CNAME",
+        "TTL": 60,
+        "ResourceRecords": [
+          {
+            "Value": "a9b665b060dd149e8bb66d8d4865332d-1404052073.ap-southeast-1.elb.amazonaws.com"
+          }
+        ]
+      }
+    }
+  ]
+}

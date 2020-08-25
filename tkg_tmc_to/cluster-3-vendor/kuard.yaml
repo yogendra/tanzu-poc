@@ -1,0 +1,147 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tanzu-kuard
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  creationTimestamp: null
+  name: kuard
+  namespace: tanzu-kuard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  creationTimestamp: null
+  name: kuard
+  namespace: tanzu-kuard
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vmware-system-tmc-psp-privileged
+subjects:
+  - kind: ServiceAccount
+    name: kuard
+    namespace: tanzu-kuard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: kuard
+  name: kuard
+  namespace: tanzu-kuard
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kuard
+  template:
+    metadata:
+      labels:
+        app: kuard
+    spec:
+      serviceAccount: kuard
+      containers:
+        - image: gcr.io/kuar-demo/kuard-amd64:1
+          imagePullPolicy: Always
+          livenessProbe:
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          httpGet:
+            path: /
+            scheme: HTTP
+            port: 8080
+          initialDelaySeconds: 300
+          periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              scheme: HTTP
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          name: kuard
+          resources:
+            requests:
+              memory: 100Mi
+              cpu: 50m
+            limits:
+              memory: 600Mi
+              cpu: 1000m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: kuard
+  name: kuard
+  namespace: tanzu-kuard
+spec:
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+  selector:
+    app: kuard
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: kuard
+  namespace: tanzu-kuard
+  labels:
+    app: kuard
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: contour
+    kubernetes.io/tls-acme: "true"
+spec:
+  tls:
+    - secretName: kuard-https-secret
+      hosts:
+        - kuard.cluster-3.poc.yogendra.me
+  rules:
+    - host: kuard.cluster-3.poc.yogendra.me
+      http:
+        paths:
+          - backend:
+              serviceName: kuard
+              servicePort: http
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kuard
+  namespace: tanzu-kuard
+spec:
+  maxReplicas: 10
+  minReplicas: 1
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kuard
+
+---
+# function cpu(){
+# curl "http://$1/keygeN" \
+#   -X 'PUT' \
+#   -H 'content-type: text/plain;charset=UTF-8' \
+#   -H 'accept: */*' \
+#   --data-binary '{"enable":true,"exitOnComplete":false,"exitCode":0,"numToGen":0,"timeToRun":0,"memQServer":"","memQQueue":""}' \
+#   --compressed
+# }
+

@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tanzu-sample-app
+  labels:
+    app: httpbin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: httpbin
+  name: httpbin
+  namespace: tanzu-sample-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: httpbin
+  template:
+    metadata:
+      labels:
+        app: httpbin
+    spec:
+      containers:
+        - image: yogendra/httpbin
+          name: httpbin
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 100m
+              memory: 200Mi
+            requests:
+              cpu: 50m
+              memory: 100Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: httpbin
+  name: httpbin
+  namespace: tanzu-sample-app
+spec:
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+  selector:
+    app: httpbin
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: httpbin
+  namespace: tanzu-sample-app
+  labels:
+    app: httpbin
+  annotations:
+    ingress.kubernetes.io/force-ssl-redirect: "true"
+    kubernetes.io/ingress.class: contour
+spec:
+  rules:
+    - host: httpbin.cluster-1.poc.yogendra.me
+      http:
+        paths:
+          - backend:
+              serviceName: httpbin
+              servicePort: http
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: httpbin
+  namespace: tanzu-sample-app
+  labels:
+    app: httpbin
+spec:
+  maxReplicas: x
+  targetCPUUtilizationPercentage: 70
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: httpbin

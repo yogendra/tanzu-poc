@@ -1,0 +1,8 @@
+.lego/
+certificates/
+certificates-*.tar.gz
+publish-images.sh
+.tkg/
+.env-private
+data/
+registry-data/

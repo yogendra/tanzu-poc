@@ -1,0 +1,31 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  namespace: tanzu-system-ingress
+  annotations:
+    # arn:aws:acm:ap-southeast-1:937349207147:certificate/68b87456-b1dc-4da1-8ed0-d39a32454a50
+    # This annotation puts the AWS ELB into "TCP" mode so that it does not
+    # do HTTP negotiation for HTTPS connections at the ELB edge.
+    # The downside of this is the remote IP address of all connections will
+    # appear to be the internal address of the ELB. See docs/proxy-proto.md
+    # for information about enabling the PROXY protocol on the ELB to recover
+    # the original remote IP address.
+    # service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
+    # service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:ap-southeast-1:937349207147:certificate/68b87456-b1dc-4da1-8ed0-d39a32454a50
+    # service.beta.kubernetes.io/aws-load-balancer-backend-protocol: http
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
+spec:
+  externalTrafficPolicy: Local
+  ports:
+    - port: 80
+      name: http
+      protocol: TCP
+    - port: 443
+      name: https
+      protocol: TCP
+      targetPort: 443
+  selector:
+    app: envoy
+  type: LoadBalancer

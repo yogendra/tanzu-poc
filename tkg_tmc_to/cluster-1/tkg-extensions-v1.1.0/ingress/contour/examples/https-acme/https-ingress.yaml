@@ -1,0 +1,29 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: https-ingress
+  namespace: test-ingress
+  labels:
+    app: hello
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    ingress.kubernetes.io/force-ssl-redirect: "true"
+    kubernetes.io/ingress.class: contour
+    kubernetes.io/tls-acme: "true"
+spec:
+  tls:
+    - secretName: https-secret
+      hosts:
+        - foo.cluster-5.poc.yogendra.me
+  rules:
+    - host: foo.cluster-5.poc.yogendra.me
+      http:
+        paths:
+          - path: /foo
+            backend:
+              serviceName: s1
+              servicePort: 80
+          - path: /bar
+            backend:
+              serviceName: s2
+              servicePort: 80

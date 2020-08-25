@@ -1,0 +1,9 @@
+externalURL: https://harbor.cluster-1.poc.yogendra.me
+expose:
+  type: ingress
+  ingress:
+    annotations:
+      kubernetes.io/ingress.class: contour
+    hosts:
+      core: harbor.cluster-1.poc.yogendra.me
+      notary: notrary.cluster-1.poc.yogendra.me

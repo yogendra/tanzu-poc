@@ -1,0 +1,47 @@
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: fluent-bit-policy
+  # namespace: fluent-bit
+spec:
+  # privileged: false # Don't allow privileged pods!
+  # # The rest fills in some required fields.
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  runAsUser:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  volumes:
+    - "*"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fluent-bit-psp-role
+  namespace: tanzu-system-logging
+rules:
+  - apiGroups:
+      - policy
+    resourceNames:
+      - fluent-bit-policy
+    resources:
+      - podsecuritypolicies
+    verbs:
+      - use
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fluent-bit-psp-role-binding
+  namespace: tanzu-system-logging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fluent-bit-psp-role
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: system:serviceaccount:tanzu-system-logging:fluent-bit

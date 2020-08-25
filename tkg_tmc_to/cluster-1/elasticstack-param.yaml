@@ -1,0 +1,61 @@
+elasticsearch:
+  enabled: true
+  client:
+    ingress:
+      enabled: true
+      annotations:
+        kubernetes.io/ingress.class: contour
+      hosts:
+        - elasticsearch.cluster-1.poc.yogendra.me
+  podSecurityPolicy:
+    enabled: true
+
+kibana:
+  enabled: true
+  ingress:
+    annotations:
+      kubernetes.io/ingress.class: contour
+    enabled: true
+    hosts:
+      - kibana.cluster-1.poc.yogendra.me
+  securityContext:
+    enabled: true
+
+fluent-bit:
+  enabled: true
+  backend:
+    type: "es"
+    es:
+      host: "tanzu-efk-elasticsearch-client"
+      time_key: "@timestamp"
+      logstash_prefix: "kubernetes_cluster"
+      replace_dots: "On"
+      retry_limit: "False"
+  rbac:
+    pspEnabled: true
+  extraEntries:
+    filter: |
+
+      [FILTER]
+          Name                record_modifier
+          Match               *
+          Record tkg_cluster cluster-1
+          Record tkg_instance cluster-1
+
+logstash:
+  enabled: false
+
+filebeat:
+  enabled: false
+
+fluentd:
+  enabled: false
+
+fluentd-elasticsearch:
+  enabled: false
+
+elasticsearch-curator:
+  enabled: false
+
+elasticsearch-exporter:
+  enabled: false

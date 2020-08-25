@@ -1,0 +1,15 @@
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: test
+  labels:
+    app: test
+    version: v1
+spec:
+  rules:
+    - host: test.cluster-1.poc.yogendra.me
+      http:
+        paths:
+          - backend:
+              serviceName: test
+              servicePort: http

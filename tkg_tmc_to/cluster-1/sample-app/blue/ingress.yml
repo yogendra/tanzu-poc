@@ -1,0 +1,15 @@
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: test-blue
+  labels:
+    app: test
+    version: v2
+spec:
+  rules:
+    - host: test-blue.cluster-1.poc.yogendra.me
+      http:
+        paths:
+          - backend:
+              serviceName: test-blue
+              servicePort: http

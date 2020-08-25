@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nginx-service-account-rb
+  namespace: ingress-nginx
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vmware-system-tmc-psp-privileged
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: system:serviceaccount:ingress-nginx:ingress-nginx
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: system:serviceaccount:ingress-nginx:ingress-nginx-admission

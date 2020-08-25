@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: test
+    version: v1
+  name: test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+      version: v1
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: test
+        version: v1
+    spec:
+      containers:
+        # user later yogendra/tmc-cluster-autoscaler:1e29f3d
+        - image: yogendra/tmc-cluster-autoscaler:a041da2
+          name: test
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: TMC_API_TOKEN
+              value: Of8e9JTv1nNZ2vic4P3tp80XYiIBwkZHPqQuZAi96bDCcPGGZa1n05CN1JFVq586

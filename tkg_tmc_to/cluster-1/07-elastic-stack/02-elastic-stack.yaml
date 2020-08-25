@@ -1,0 +1,1218 @@
+---
+# Source: elastic-stack/charts/elasticsearch/templates/podsecuritypolicy.yaml
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: tanzu-efk-elasticsearch
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    heritage: Helm
+    release: tanzu-efk
+  annotations:
+spec:
+  privileged: true
+  allowPrivilegeEscalation: true
+  volumes:
+    - "configMap"
+    - "secret"
+    - "emptyDir"
+    - "persistentVolumeClaim"
+  hostNetwork: false
+  hostPID: false
+  hostIPC: false
+  runAsUser:
+    rule: "RunAsAny"
+  runAsGroup:
+    rule: "RunAsAny"
+  seLinux:
+    rule: "RunAsAny"
+  supplementalGroups:
+    rule: "RunAsAny"
+  fsGroup:
+    rule: "MustRunAs"
+    ranges:
+      - min: 1000
+        max: 1000
+  readOnlyRootFilesystem: false
+  hostPorts:
+    - min: 1
+      max: 65535
+---
+# Source: elastic-stack/charts/fluent-bit/templates/psp.yaml
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: tanzu-efk-fluent-bit
+spec:
+  # Prevents running in privileged mode
+  privileged: false
+  # Required to prevent escalations to root.
+  allowPrivilegeEscalation: false
+  # This is redundant with non-root + disallow privilege escalation,
+  # but we can provide it for defense in depth.
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - "configMap"
+    - "secret"
+    - "hostPath"
+  allowedHostPaths:
+    - pathPrefix: "/var/log"
+    - pathPrefix: "/var/lib/docker/containers"
+      readOnly: true
+    - pathPrefix: "/fluent-bit/etc"
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: "RunAsAny"
+  seLinux:
+    # This policy assumes the nodes are using AppArmor rather than SELinux.
+    rule: "RunAsAny"
+  supplementalGroups:
+    rule: "MustRunAs"
+    ranges:
+      # Forbid adding the root group.
+      - min: 1
+        max: 65535
+  fsGroup:
+    rule: "MustRunAs"
+    ranges:
+      # Forbid adding the root group.
+      - min: 1
+        max: 65535
+  readOnlyRootFilesystem: false
+---
+# Source: elastic-stack/charts/elasticsearch/templates/client-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "client"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-elasticsearch-client
+---
+# Source: elastic-stack/charts/elasticsearch/templates/data-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "data"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-elasticsearch-data
+---
+# Source: elastic-stack/charts/elasticsearch/templates/master-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "master"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-elasticsearch-master
+---
+# Source: elastic-stack/charts/fluent-bit/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: fluent-bit
+    chart: fluent-bit-2.8.0
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-fluent-bit
+---
+# Source: elastic-stack/charts/fluent-bit/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: "tanzu-efk-fluent-bit-es-tls-secret"
+  labels:
+    app: fluent-bit
+    chart: fluent-bit-2.8.0
+    heritage: Helm
+    release: tanzu-efk
+type: Opaque
+data:
+  es-tls-ca.crt: ""
+---
+# Source: elastic-stack/charts/elasticsearch/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tanzu-efk-elasticsearch
+  labels:
+    app: tanzu-efk-elasticsearch
+    chart: "elasticsearch-1.32.0"
+    release: "tanzu-efk"
+    heritage: "Helm"
+data:
+  elasticsearch.yml: |-
+    cluster.name: elasticsearch
+
+    node.data: ${NODE_DATA:true}
+    node.master: ${NODE_MASTER:true}
+    node.ingest: ${NODE_INGEST:true}
+    node.name: ${HOSTNAME}
+    network.host: 0.0.0.0
+    # see https://github.com/kubernetes/kubernetes/issues/3595
+    bootstrap.memory_lock: ${BOOTSTRAP_MEMORY_LOCK:false}
+
+    discovery:
+      zen:
+        ping.unicast.hosts: ${DISCOVERY_SERVICE:}
+        minimum_master_nodes: ${MINIMUM_MASTER_NODES:2}
+
+    # see https://github.com/elastic/elasticsearch-definitive-guide/pull/679
+    processors: ${PROCESSORS:}
+
+    # avoid split-brain w/ a minimum consensus of two masters plus a data node
+    gateway.expected_master_nodes: ${EXPECTED_MASTER_NODES:2}
+    gateway.expected_data_nodes: ${EXPECTED_DATA_NODES:1}
+    gateway.recover_after_time: ${RECOVER_AFTER_TIME:5m}
+    gateway.recover_after_master_nodes: ${RECOVER_AFTER_MASTER_NODES:2}
+    gateway.recover_after_data_nodes: ${RECOVER_AFTER_DATA_NODES:1}
+  log4j2.properties: |-
+    status = error
+    appender.console.type = Console
+    appender.console.name = console
+    appender.console.layout.type = PatternLayout
+    appender.console.layout.pattern = [%d{ISO8601}][%-5p][%-25c{1.}] %marker%m%n
+    rootLogger.level = info
+    rootLogger.appenderRef.console.ref = console
+    logger.searchguard.name = com.floragunn
+    logger.searchguard.level = info
+
+  data-pre-stop-hook.sh: |-
+    #!/bin/bash
+    exec &> >(tee -a "/var/log/elasticsearch-hooks.log")
+    NODE_NAME=${HOSTNAME}
+    echo "Prepare to migrate data of the node ${NODE_NAME}"
+    echo "Move all data from node ${NODE_NAME}"
+    curl -s -XPUT -H 'Content-Type: application/json' 'tanzu-efk-elasticsearch-client:9200/_cluster/settings' -d "{
+      \"transient\" :{
+          \"cluster.routing.allocation.exclude._name\" : \"${NODE_NAME}\"
+      }
+    }"
+    echo ""
+
+    while true ; do
+      echo -e "Wait for node ${NODE_NAME} to become empty"
+      SHARDS_ALLOCATION=$(curl -s -XGET 'http://tanzu-efk-elasticsearch-client:9200/_cat/shards')
+      if ! echo "${SHARDS_ALLOCATION}" | grep -E "${NODE_NAME}"; then
+        break
+      fi
+      sleep 1
+    done
+    echo "Node ${NODE_NAME} is ready to shutdown"
+  data-post-start-hook.sh: |-
+    #!/bin/bash
+    exec &> >(tee -a "/var/log/elasticsearch-hooks.log")
+    NODE_NAME=${HOSTNAME}
+    CLUSTER_SETTINGS=$(curl -s -XGET "http://tanzu-efk-elasticsearch-client:9200/_cluster/settings")
+    if echo "${CLUSTER_SETTINGS}" | grep -E "${NODE_NAME}"; then
+      echo "Activate node ${NODE_NAME}"
+      curl -s -XPUT -H 'Content-Type: application/json' "http://tanzu-efk-elasticsearch-client:9200/_cluster/settings" -d "{
+        \"transient\" :{
+            \"cluster.routing.allocation.exclude._name\" : null
+        }
+      }"
+    fi
+    echo "Node ${NODE_NAME} is ready to be used"
+---
+# Source: elastic-stack/charts/elasticsearch/templates/tests/test-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tanzu-efk-elasticsearch-test
+  labels:
+    app: tanzu-efk-elasticsearch
+    chart: "elasticsearch-1.32.0"
+    heritage: "Helm"
+    release: "tanzu-efk"
+data:
+  run.sh: |-
+    @test "Test Access and Health" {
+      curl -D - http://tanzu-efk-elasticsearch-client:9200
+      curl -D - http://tanzu-efk-elasticsearch-client:9200/_cluster/health?wait_for_status=green
+    }
+---
+# Source: elastic-stack/charts/fluent-bit/templates/config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tanzu-efk-fluent-bit-config
+  labels:
+    app: fluent-bit
+    chart: fluent-bit-2.8.0
+    heritage: Helm
+    release: tanzu-efk
+data:
+  fluent-bit-service.conf: |
+    [SERVICE]
+        Flush        1
+        Daemon       Off
+        Log_Level    info
+        Parsers_File parsers.conf
+
+  fluent-bit-input.conf: |
+    [INPUT]
+        Name             tail
+        Path             /var/log/containers/*.log
+        Parser           docker
+        Tag              kube.*
+        Refresh_Interval 5
+        Mem_Buf_Limit    5MB
+        Skip_Long_Lines  On
+
+  fluent-bit-filter.conf: |
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Kube_Tag_Prefix     kube.var.log.containers.
+        Kube_URL            https://kubernetes.default.svc:443
+        Kube_CA_File        /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        Kube_Token_File     /var/run/secrets/kubernetes.io/serviceaccount/token
+        Merge_Log           On
+        K8S-Logging.Parser  On
+        K8S-Logging.Exclude On
+        
+    [FILTER]
+        Name                record_modifier
+        Match               *
+        Record tkg_cluster cluster-1
+        Record tkg_instance cluster-1
+
+  fluent-bit-output.conf: |
+
+    [OUTPUT]
+        Name  es
+        Match *
+        Host  tanzu-efk-elasticsearch-client
+        Port  9200
+        Logstash_Format On
+        Retry_Limit False
+        Type  flb_type
+        Time_Key @timestamp
+        Replace_Dots On
+        Logstash_Prefix kubernetes_cluster
+
+  fluent-bit.conf: |
+    @INCLUDE fluent-bit-service.conf
+    @INCLUDE fluent-bit-input.conf
+    @INCLUDE fluent-bit-filter.conf
+    @INCLUDE fluent-bit-output.conf
+
+  parsers.conf: |
+---
+# Source: elastic-stack/charts/fluent-bit/templates/tests/test-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tanzu-efk-fluent-bit-test
+  labels:
+    app: tanzu-efk-fluent-bit
+    chart: "fluent-bit-2.8.0"
+    heritage: "Helm"
+    release: "tanzu-efk"
+data:
+  run.sh: |-
+    @test "Test Elasticssearch Indices" {
+      url="http://tanzu-efk-elasticsearch-client:9200/_cat/indices?format=json"
+      body=$(curl $url)
+
+      result=$(echo $body | jq -cr '.[] | select(.index | contains("kubernetes_cluster"))')
+      [ "$result" != "" ]
+
+      result=$(echo $body | jq -cr '.[] | select((.index | contains("kubernetes_cluster")) and (.health != "green"))')
+      [ "$result" == "" ]
+    }
+
+  fluentd.conf: |-
+    <source>
+      @type forward
+      bind 0.0.0.0
+      port 24284
+      shared_key 
+    </source>
+
+    <match **>
+      @type stdout
+    </match>
+---
+# Source: elastic-stack/charts/kibana/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tanzu-efk-kibana
+  labels:
+    app: kibana
+    chart: "kibana-3.2.7"
+    release: tanzu-efk
+    heritage: Helm
+data:
+  kibana.yml: |
+    elasticsearch.hosts: http://elasticsearch:9200
+    server.host: "0"
+    server.name: kibana
+---
+# Source: elastic-stack/charts/kibana/templates/tests/test-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tanzu-efk-kibana-test
+  labels:
+    app: tanzu-efk-kibana
+    chart: "kibana-3.2.7"
+    heritage: "Helm"
+    release: "tanzu-efk"
+data:
+  run.sh: |-
+    @test "Test Status" {
+      url="http://tanzu-efk-kibana:443/api/status"
+
+      # retry for 1 minute
+      run curl -s -o /dev/null -I -w "%{http_code}" --retry 30 --retry-delay 2 $url
+
+      code=$(curl -s -o /dev/null -I -w "%{http_code}" $url)
+      body=$(curl $url)
+      if [ "$code" == "503" ]
+      then
+        skip "Kibana Unavailable (503), can't get status - see pod logs: $body"
+      fi
+
+      result=$(echo $body | jq -cr '.status.statuses[]')
+      [ "$result" != "" ]
+
+      result=$(echo $body | jq -cr '.status.statuses[] | select(.state != "green")')
+      [ "$result" == "" ]
+    }
+---
+# Source: elastic-stack/charts/fluent-bit/templates/cluster-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app: fluent-bit
+    chart: fluent-bit-2.8.0
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-fluent-bit
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+  - apiGroups:
+      - policy
+    resources:
+      - podsecuritypolicies
+    resourceNames:
+      - tanzu-efk-fluent-bit
+    verbs:
+      - use
+---
+# Source: elastic-stack/charts/fluent-bit/templates/cluster-rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app: fluent-bit
+    chart: fluent-bit-2.8.0
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-fluent-bit
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tanzu-efk-fluent-bit
+subjects:
+  - kind: ServiceAccount
+    name: tanzu-efk-fluent-bit
+    namespace: tanzu-efk
+---
+# Source: elastic-stack/charts/elasticsearch/templates/role.yaml
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  name: tanzu-efk-elasticsearch
+  labels:
+    app: elasticsearch
+    chart: "elasticsearch-1.32.0"
+    release: "tanzu-efk"
+    heritage: "Helm"
+rules:
+  - apiGroups: ["extensions"]
+    resources: ["podsecuritypolicies"]
+    verbs: ["use"]
+    resourceNames:
+      - tanzu-efk-elasticsearch
+---
+# Source: elastic-stack/charts/elasticsearch/templates/rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  name: tanzu-efk-elasticsearch
+  labels:
+    app: elasticsearch
+    chart: "elasticsearch-1.32.0"
+    release: "tanzu-efk"
+    heritage: "Helm"
+roleRef:
+  kind: Role
+  name: tanzu-efk-elasticsearch
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: tanzu-efk-elasticsearch-client
+    namespace: tanzu-efk
+  - kind: ServiceAccount
+    name: tanzu-efk-elasticsearch-data
+    namespace: tanzu-efk
+  - kind: ServiceAccount
+    name: tanzu-efk-elasticsearch-master
+    namespace: tanzu-efk
+---
+# Source: elastic-stack/charts/elasticsearch/templates/client-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "client"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-elasticsearch-client
+
+spec:
+  ports:
+    - name: http
+      port: 9200
+      targetPort: http
+  selector:
+    app: elasticsearch
+    component: "client"
+    release: tanzu-efk
+  type: ClusterIP
+---
+# Source: elastic-stack/charts/elasticsearch/templates/master-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "master"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-elasticsearch-discovery
+spec:
+  clusterIP: None
+  ports:
+    - port: 9300
+      targetPort: transport
+  selector:
+    app: elasticsearch
+    component: "master"
+    release: tanzu-efk
+---
+# Source: elastic-stack/charts/kibana/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: kibana
+    chart: kibana-3.2.7
+    release: tanzu-efk
+    heritage: Helm
+  name: tanzu-efk-kibana
+spec:
+  type: ClusterIP
+  ports:
+    - port: 443
+      targetPort: 5601
+      protocol: TCP
+
+  selector:
+    app: kibana
+    release: tanzu-efk
+---
+# Source: elastic-stack/charts/fluent-bit/templates/daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tanzu-efk-fluent-bit
+  labels:
+    app: fluent-bit
+    chart: fluent-bit-2.8.0
+    heritage: Helm
+    release: tanzu-efk
+spec:
+  selector:
+    matchLabels:
+      app: fluent-bit
+      release: tanzu-efk
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: fluent-bit
+        release: tanzu-efk
+      annotations:
+        checksum/config: 9b0fcb80391734f6d5576039f6a235868ec19d823b85a056f03037841f4e34a9
+    spec:
+      hostNetwork: false
+      dnsPolicy: ClusterFirst
+      serviceAccountName: tanzu-efk-fluent-bit
+      containers:
+        - name: fluent-bit
+          image: "fluent/fluent-bit:1.3.2"
+          imagePullPolicy: "Always"
+          env: []
+          resources: {}
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: config
+              mountPath: /fluent-bit/etc/fluent-bit.conf
+              subPath: fluent-bit.conf
+            - name: config
+              mountPath: /fluent-bit/etc/fluent-bit-service.conf
+              subPath: fluent-bit-service.conf
+            - name: config
+              mountPath: /fluent-bit/etc/fluent-bit-input.conf
+              subPath: fluent-bit-input.conf
+            - name: config
+              mountPath: /fluent-bit/etc/fluent-bit-filter.conf
+              subPath: fluent-bit-filter.conf
+            - name: config
+              mountPath: /fluent-bit/etc/fluent-bit-output.conf
+              subPath: fluent-bit-output.conf
+
+      terminationGracePeriodSeconds: 10
+
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: config
+          configMap:
+            name: tanzu-efk-fluent-bit-config
+---
+# Source: elastic-stack/charts/elasticsearch/templates/client-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "client"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-elasticsearch-client
+spec:
+  selector:
+    matchLabels:
+      app: elasticsearch
+      component: "client"
+      release: tanzu-efk
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+        component: "client"
+        release: tanzu-efk
+      annotations:
+        checksum/config: 65366bae1dfb0475a836bdc8bf671e0f2c84b5dc590ee2711898a4a819936918
+    spec:
+      serviceAccountName: tanzu-efk-elasticsearch-client
+      securityContext:
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: "elasticsearch"
+                    release: "tanzu-efk"
+                    component: "client"
+      initContainers:
+        # see https://www.elastic.co/guide/en/elasticsearch/reference/current/vm-max-map-count.html
+        # and https://www.elastic.co/guide/en/elasticsearch/reference/current/setup-configuration-memory.html#mlockall
+        - name: "sysctl"
+          image: "busybox:latest"
+          imagePullPolicy: "Always"
+          resources: {}
+          command: ["sysctl", "-w", "vm.max_map_count=262144"]
+          securityContext:
+            privileged: true
+      containers:
+        - name: elasticsearch
+          env:
+            - name: NODE_DATA
+              value: "false"
+            - name: NODE_MASTER
+              value: "false"
+            - name: DISCOVERY_SERVICE
+              value: tanzu-efk-elasticsearch-discovery
+            - name: PROCESSORS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+            - name: ES_JAVA_OPTS
+              value: "-Djava.net.preferIPv4Stack=true -Xms512m -Xmx512m  "
+            - name: MINIMUM_MASTER_NODES
+              value: "2"
+          resources:
+            limits:
+              cpu: "1"
+            requests:
+              cpu: 25m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: 9200
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /_cluster/health?local=true
+              port: 9200
+            initialDelaySeconds: 90
+          image: "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.2"
+          imagePullPolicy: "IfNotPresent"
+          ports:
+            - containerPort: 9200
+              name: http
+            - containerPort: 9300
+              name: transport
+          volumeMounts:
+            - mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+              name: config
+              subPath: elasticsearch.yml
+      volumes:
+        - name: config
+          configMap:
+            name: tanzu-efk-elasticsearch
+---
+# Source: elastic-stack/charts/kibana/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: kibana
+    chart: "kibana-3.2.7"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-kibana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+      release: tanzu-efk
+  revisionHistoryLimit: 3
+  template:
+    metadata:
+      annotations:
+        checksum/config: a580e41cd4612edfeca9a37ec7da3a65afe3213dcd8ab499d9bbb195dec8d17c
+      labels:
+        app: kibana
+        release: "tanzu-efk"
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: kibana
+          image: "docker.elastic.co/kibana/kibana-oss:6.7.0"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: "ELASTICSEARCH_HOSTS"
+              value: "http://tanzu-efk-elasticsearch-client:9200"
+          ports:
+            - containerPort: 5601
+              name: kibana
+              protocol: TCP
+          resources: {}
+          volumeMounts:
+            - name: kibana
+              mountPath: "/usr/share/kibana/config/kibana.yml"
+              subPath: kibana.yml
+      tolerations: []
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 2000
+      volumes:
+        - name: kibana
+          configMap:
+            name: tanzu-efk-kibana
+---
+# Source: elastic-stack/charts/elasticsearch/templates/data-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "data"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-elasticsearch-data
+spec:
+  selector:
+    matchLabels:
+      app: elasticsearch
+      release: tanzu-efk
+  serviceName: tanzu-efk-elasticsearch-data
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+        component: "data"
+        release: tanzu-efk
+        role: data
+    spec:
+      serviceAccountName: tanzu-efk-elasticsearch-data
+      securityContext:
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: "elasticsearch"
+                    release: "tanzu-efk"
+                    component: "data"
+      initContainers:
+        # see https://www.elastic.co/guide/en/elasticsearch/reference/current/vm-max-map-count.html
+        # and https://www.elastic.co/guide/en/elasticsearch/reference/current/setup-configuration-memory.html#mlockall
+        - name: "sysctl"
+          image: "busybox:latest"
+          imagePullPolicy: "Always"
+          resources: {}
+          command: ["sysctl", "-w", "vm.max_map_count=262144"]
+          securityContext:
+            privileged: true
+        - name: "chown"
+          image: "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.2"
+          imagePullPolicy: "IfNotPresent"
+          resources: {}
+          command:
+            - /bin/bash
+            - -c
+            - >
+              set -e;
+              set -x;
+              chown elasticsearch:elasticsearch /usr/share/elasticsearch/data;
+              for datadir in $(find /usr/share/elasticsearch/data -mindepth 1 -maxdepth 1 -not -name ".snapshot"); do
+                chown -R elasticsearch:elasticsearch $datadir;
+              done;
+              chown elasticsearch:elasticsearch /usr/share/elasticsearch/logs;
+              for logfile in $(find /usr/share/elasticsearch/logs -mindepth 1 -maxdepth 1 -not -name ".snapshot"); do
+                chown -R elasticsearch:elasticsearch $logfile;
+              done
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - mountPath: /usr/share/elasticsearch/data
+              name: data
+      containers:
+        - name: elasticsearch
+          env:
+            - name: DISCOVERY_SERVICE
+              value: tanzu-efk-elasticsearch-discovery
+            - name: NODE_MASTER
+              value: "false"
+            - name: PROCESSORS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+            - name: ES_JAVA_OPTS
+              value: "-Djava.net.preferIPv4Stack=true -Xms1536m -Xmx1536m  "
+            - name: MINIMUM_MASTER_NODES
+              value: "2"
+          image: "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.2"
+          imagePullPolicy: "IfNotPresent"
+          ports:
+            - containerPort: 9300
+              name: transport
+
+          resources:
+            limits:
+              cpu: "1"
+            requests:
+              cpu: 25m
+              memory: 1536Mi
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health?local=true
+              port: 9200
+            initialDelaySeconds: 5
+          volumeMounts:
+            - mountPath: /usr/share/elasticsearch/data
+              name: data
+            - mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+              name: config
+              subPath: elasticsearch.yml
+            - name: config
+              mountPath: /data-pre-stop-hook.sh
+              subPath: data-pre-stop-hook.sh
+            - name: config
+              mountPath: /data-post-start-hook.sh
+              subPath: data-post-start-hook.sh
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/bash", "/data-pre-stop-hook.sh"]
+            postStart:
+              exec:
+                command: ["/bin/bash", "/data-post-start-hook.sh"]
+      terminationGracePeriodSeconds: 3600
+      volumes:
+        - name: config
+          configMap:
+            name: tanzu-efk-elasticsearch
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: OnDelete
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "30Gi"
+---
+# Source: elastic-stack/charts/elasticsearch/templates/master-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "master"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-elasticsearch-master
+spec:
+  selector:
+    matchLabels:
+      app: elasticsearch
+      release: tanzu-efk
+  serviceName: tanzu-efk-elasticsearch-master
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+        component: "master"
+        release: tanzu-efk
+        role: master
+    spec:
+      serviceAccountName: tanzu-efk-elasticsearch-master
+      securityContext:
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: "elasticsearch"
+                    release: "tanzu-efk"
+                    component: "master"
+      initContainers:
+        # see https://www.elastic.co/guide/en/elasticsearch/reference/current/vm-max-map-count.html
+        # and https://www.elastic.co/guide/en/elasticsearch/reference/current/setup-configuration-memory.html#mlockall
+        - name: "sysctl"
+          image: "busybox:latest"
+          imagePullPolicy: "Always"
+          resources: {}
+          command: ["sysctl", "-w", "vm.max_map_count=262144"]
+          securityContext:
+            privileged: true
+        - name: "chown"
+          image: "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.2"
+          imagePullPolicy: "IfNotPresent"
+          resources: {}
+          command:
+            - /bin/bash
+            - -c
+            - >
+              set -e;
+              set -x;
+              chown elasticsearch:elasticsearch /usr/share/elasticsearch/data;
+              for datadir in $(find /usr/share/elasticsearch/data -mindepth 1 -maxdepth 1 -not -name ".snapshot"); do
+                chown -R elasticsearch:elasticsearch $datadir;
+              done;
+              chown elasticsearch:elasticsearch /usr/share/elasticsearch/logs;
+              for logfile in $(find /usr/share/elasticsearch/logs -mindepth 1 -maxdepth 1 -not -name ".snapshot"); do
+                chown -R elasticsearch:elasticsearch $logfile;
+              done
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - mountPath: /usr/share/elasticsearch/data
+              name: data
+      containers:
+        - name: elasticsearch
+          env:
+            - name: NODE_DATA
+              value: "false"
+            - name: DISCOVERY_SERVICE
+              value: tanzu-efk-elasticsearch-discovery
+            - name: PROCESSORS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+            - name: ES_JAVA_OPTS
+              value: "-Djava.net.preferIPv4Stack=true -Xms512m -Xmx512m  "
+            - name: MINIMUM_MASTER_NODES
+              value: "2"
+          resources:
+            limits:
+              cpu: "1"
+            requests:
+              cpu: 25m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health?local=true
+              port: 9200
+            initialDelaySeconds: 5
+          image: "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.2"
+          imagePullPolicy: "IfNotPresent"
+          ports:
+            - containerPort: 9300
+              name: transport
+
+          volumeMounts:
+            - mountPath: /usr/share/elasticsearch/data
+              name: data
+            - mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+              name: config
+              subPath: elasticsearch.yml
+      volumes:
+        - name: config
+          configMap:
+            name: tanzu-efk-elasticsearch
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: OnDelete
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "4Gi"
+---
+# Source: elastic-stack/charts/elasticsearch/templates/client-ingress.yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: tanzu-efk-elasticsearch-client
+  labels:
+    app: elasticsearch
+    chart: elasticsearch-1.32.0
+    component: "client"
+    heritage: Helm
+    release: tanzu-efk
+  annotations:
+    kubernetes.io/ingress.class: contour
+spec:
+  rules:
+    - host: "elasticsearch.cluster-1.poc.yogendra.me"
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: tanzu-efk-elasticsearch-client
+              servicePort: 9200
+---
+# Source: elastic-stack/charts/kibana/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1beta1
+
+kind: Ingress
+metadata:
+  labels:
+    app: kibana
+    chart: "kibana-3.2.7"
+    heritage: Helm
+    release: tanzu-efk
+  name: tanzu-efk-kibana
+  annotations:
+    kubernetes.io/ingress.class: "contour"
+spec:
+  rules:
+    - host: kibana.cluster-1.poc.yogendra.me
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: tanzu-efk-kibana
+              servicePort: 443
+---
+# Source: elastic-stack/charts/elasticsearch/templates/tests/test.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tanzu-efk-elasticsearch-test
+  labels:
+    app: tanzu-efk-elasticsearch
+    chart: "elasticsearch-1.32.0"
+    heritage: "Helm"
+    release: "tanzu-efk"
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  initContainers:
+    - name: test-framework
+      image: "dduportal/bats:0.4.0"
+      command:
+        - "bash"
+        - "-c"
+        - |
+          set -ex
+          # copy bats to tools dir
+          cp -R /usr/local/libexec/ /tools/bats/
+      volumeMounts:
+        - mountPath: /tools
+          name: tools
+  containers:
+    - name: tanzu-efk-test
+      image: "dduportal/bats:0.4.0"
+      command: ["/tools/bats/bats", "-t", "/tests/run.sh"]
+      volumeMounts:
+        - mountPath: /tests
+          name: tests
+          readOnly: true
+        - mountPath: /tools
+          name: tools
+  volumes:
+    - name: tests
+      configMap:
+        name: tanzu-efk-elasticsearch-test
+    - name: tools
+      emptyDir: {}
+  restartPolicy: Never
+---
+# Source: elastic-stack/charts/fluent-bit/templates/tests/test.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tanzu-efk-fluent-bit-test
+  labels:
+    app: tanzu-efk-fluent-bit
+    chart: "fluent-bit-2.8.0"
+    heritage: "Helm"
+    release: "tanzu-efk"
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  initContainers:
+    - name: test-framework
+      image: "dduportal/bats:0.4.0"
+      command:
+        - "bash"
+        - "-c"
+        - |
+          set -ex
+          # copy bats to tools dir
+          cp -R /usr/local/libexec/ /tools/bats/
+      volumeMounts:
+        - mountPath: /tools
+          name: tools
+  containers:
+    - name: tanzu-efk-test
+      image: "dwdraju/alpine-curl-jq"
+      command: ["/tools/bats/bats", "-t", "/tests/run.sh"]
+      volumeMounts:
+        - mountPath: /tests
+          name: tests
+          readOnly: true
+        - mountPath: /tools
+          name: tools
+  volumes:
+    - name: tests
+      configMap:
+        name: tanzu-efk-fluent-bit-test
+    - name: tools
+      emptyDir: {}
+  restartPolicy: Never
+---
+# Source: elastic-stack/charts/kibana/templates/tests/test.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tanzu-efk-kibana-test
+  labels:
+    app: tanzu-efk-kibana
+    chart: "kibana-3.2.7"
+    heritage: "Helm"
+    release: "tanzu-efk"
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  initContainers:
+    - name: test-framework
+      image: "dduportal/bats:0.4.0"
+      command:
+        - "bash"
+        - "-c"
+        - |
+          set -ex
+          # copy bats to tools dir
+          cp -R /usr/local/libexec/ /tools/bats/
+      volumeMounts:
+        - mountPath: /tools
+          name: tools
+  containers:
+    - name: tanzu-efk-test
+      image: "dwdraju/alpine-curl-jq"
+      command: ["/tools/bats/bats", "-t", "/tests/run.sh"]
+      volumeMounts:
+        - mountPath: /tests
+          name: tests
+          readOnly: true
+        - mountPath: /tools
+          name: tools
+  volumes:
+    - name: tests
+      configMap:
+        name: tanzu-efk-kibana-test
+    - name: tools
+      emptyDir: {}
+  restartPolicy: Never
