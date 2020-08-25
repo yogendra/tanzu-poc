@@ -3,6 +3,12 @@
 SCRIPT_ROOT=$( cd `dirname $0`; pwd)
 source $SCRIPT_ROOT/.env
 
+set -e 
+echo "Checking Docker runtime"
+docker run --rm -t hello-world
+
+
+docker rm -f registry
 
 docker run \
   --restart=always \
@@ -14,10 +20,20 @@ docker run \
   -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/${ROOT_DOMAIN}.crt \
   -e REGISTRY_HTTP_TLS_KEY=/certs/${ROOT_DOMAIN}.key \
   -p 443:443 \
+  -d \
   registry:2
 
+echo "Tag for local registry hello-world => $LOCAL_REGISTY/hello-world"
+docker tag hello-world ${LOCAL_REGISTRY}/hello-world
 
+echo "Push image tp ${LOCAL_REGISTRY}/hello-world"
+docker push ${LOCAL_REGISTRY}/hello-world
 
- docker tag hello-world registry-tkg-vmware-run.poc.yogendra.me/hello-worlddocker push registry-tkg-vmware-run.poc.yogendra.me/hello-worlddocker rmi  registry-tkg-vmware-run.poc.yogendra.me/hello-worlddocker rmi  hello-world
-From Me to Everyone: (18:09)
-docker pull  registry-tkg-vmware-run.poc.yogendra.me/hello-worlddocker run  registry-tkg-vmware-run.poc.yogendra.me/hello-world
+echo "Remove local cached images"
+docker rmi -f  ${LOCAL_REGISTRY}/hello-world hello-world
+
+echo "Pull from $LOCAL_REGISTRY/hello-world"
+docker pull  ${LOCAL_REGISTRY}/hello-world
+
+echo "Run image from $LOCAL_REGISTRY/hello-world"
+docker run  --rm -t ${LOCAL_REGISTRY}/hello-world
