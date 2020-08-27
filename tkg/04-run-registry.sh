@@ -8,7 +8,7 @@ echo "Checking Docker runtime"
 docker run --rm -t hello-world
 
 
-[[ docker ps -a | grep registry ]] && docker rm -f registry
+ docker ps -a | grep registry &> /dev/null && docker rm -f registry
 
 docker run \
   --restart=always \
