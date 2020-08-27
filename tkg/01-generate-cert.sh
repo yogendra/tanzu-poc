@@ -9,12 +9,12 @@ CERT_ARCHIVE=$SCRIPT_ROOT/certificates-${ROOT_DOMAIN}.tar.gz
 
 set -e
 
-lego \
-  -a \
-  --email ${CERT_EMAIL} \
-  --dns route53 \
-  -d ${ROOT_DOMAIN} \
-  -d \*.${ROOT_DOMAIN} \
+
+docker run -v $SCRIPT_ROOT/.lego:/.lego goacme/lego \
+  --email="${CERT_EMAIL}" \
+  --dns=route53 \
+  --domains="${ROOT_DOMAIN}" \
+  --domains="*.${ROOT_DOMAIN}" \
   run
 
 [[ -d $CERT_DIR ]] || mkdir -p $CERT_DIR
