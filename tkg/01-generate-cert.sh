@@ -9,13 +9,6 @@ CERT_ARCHIVE=$SCRIPT_ROOT/certificates-${ROOT_DOMAIN}.tar.gz
 
 set -e
 
-if command -v lego 
-then
-  https://github.com/go-acme/lego/releases/download/v3.8.0/lego_v3.8.0_linux_amd64.tar.gz
-  curl -sSL https://github.com/go-acme/lego/releases/download/v3.8.0/lego_v3.8.0_linux_amd64.tar.gz | tar -C $HOME/bin xzv lego 
-  chmod a+x $HOME/bin/lego
-fi
-
 export PATH=$HOME/bin:$PATH
 lego \
   --accept-tos \
