@@ -9,12 +9,20 @@ CERT_ARCHIVE=$SCRIPT_ROOT/certificates-${ROOT_DOMAIN}.tar.gz
 
 set -e
 
+if command -v lego 
+then
+  https://github.com/go-acme/lego/releases/download/v3.8.0/lego_v3.8.0_linux_amd64.tar.gz
+  curl -sSL https://github.com/go-acme/lego/releases/download/v3.8.0/lego_v3.8.0_linux_amd64.tar.gz | tar -C $HOME/bin xzv lego 
+  chmod a+x $HOME/bin/lego
+fi
 
-docker run -v $SCRIPT_ROOT/.lego:/.lego goacme/lego \
-  --email="${CERT_EMAIL}" \
-  --dns=route53 \
-  --domains="${ROOT_DOMAIN}" \
-  --domains="*.${ROOT_DOMAIN}" \
+export PATH=$HOME/bin:$PATH
+lego \
+  --accept-tos \
+  --email "${CERT_EMAIL}" \
+  --dns route53 \
+  --domains "${ROOT_DOMAIN}" \
+  --domains "*.${ROOT_DOMAIN}" \
   run
 
 [[ -d $CERT_DIR ]] || mkdir -p $CERT_DIR
