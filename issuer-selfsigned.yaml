@@ -1,0 +1,35 @@
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Issuer
+metadata:
+  name: selfsigned-bootstrap-ca
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: bootstrap-ca
+  namespace: cert-manager
+spec:
+  secretName: selfsigned-ca-keypair
+  isCA: true
+  # 2 years
+  duration: 26280h
+  # 15 days
+  renewBefore: 360h
+  keysize: 2048
+  keyAlgorithm: rsa
+  commonName: "Core CNA Demo CA"
+  issuerRef:
+    name: selfsigned-bootstrap-ca
+
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-ca
+spec:
+  ca:
+    secretName: selfsigned-ca-keypair
